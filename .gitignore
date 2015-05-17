@@ -1,32 +1,420 @@
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
 
-# Precompiled Headers
-*.gch
-*.pch
+// NOTES
+// 50kPa = 5.10 mH20 max water column depth (http://www.convert-measurement-units.com/conversion-calculator.php?type=pressure)
+// If max v of 4.5v = 50kPa, then sensorValue of 921 (920.7) = 50kPa
+#include <DallasTemperature.h>
+#include <OneWire.h>
+#define ONE_WIRE_BUS 12
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+#include <Wire.h>
+#include <LCD.h>
+#include <LiquidCrystal_I2C.h>
+#include <Process.h>
+#include <HttpClient.h>
 
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
+#define I2C_ADDR      0x27 // I2C address of PCF8574A
+#define BACKLIGHT_PIN 3
+#define En_pin        2
+#define Rw_pin        1
+#define Rs_pin        0
+#define D4_pin        4
+#define D5_pin        5
+#define D6_pin        6
+#define D7_pin        7
 
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
+LiquidCrystal_I2C twilcd(I2C_ADDR, En_pin, Rw_pin, Rs_pin, D4_pin, D5_pin, D6_pin, D7_pin, BACKLIGHT_PIN, POSITIVE);
 
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
+#include <Bridge.h>
+#include <Console.h>
+#include <YunServer.h>
+#include <YunClient.h>
+YunServer server;
+#define ARRAY_SIZE           6  // array for post to ThingSpeak
 
-# Debug files
-*.dSYM/
+unsigned long nextLogTime;
+unsigned long motorLastStop = 0;
+unsigned long motorLastStart = 0; // what time did we turn the output on?
+const unsigned long motorDelayOff = 6000;   // Length of Run //
+const unsigned long motorDelayOn = 3567000; //1800000; // Time Between Runs //
+
+int motorStatus;
+const int yes = 0;
+const int no = 1;
+int LogStatus = no;
+const int on = 0;
+const int off = 1;
+
+int thermistorPin = A1;
+int motorPin = 6;
+int fanPin = 5;
+int sensorPin = A0;
+int pirPin = A5;
+float inch = 0;
+float psi = 0;
+float sensorRead = 0;
+
+int sensorValue = 0, sensorMax = 1023, kpaRangeTopVoltage = 4.5;
+float voltage = 0, kpa = 0, sensorOffset = -6, voltageMax = 5.0; //4.96;
+float temp_f;
+
+#define LCD_LIGHT_ON_TIME 60000 // How long (in milliseconds) should lcd light stay on?
+unsigned int currentLcdLightOnTime = 0; // For calculating the lcd light on time.
+unsigned long lcdLightOn_StartMillis;
+boolean isLcdLightOn = true;
+boolean jumpPir;
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(motorPin, OUTPUT);
+  analogWrite(motorPin, 0);
+  pinMode(fanPin, OUTPUT);
+  analogWrite(fanPin, 0);
+  pinMode(pirPin, INPUT);
+  pinMode(A4, OUTPUT); // PIR +Power
+  digitalWrite(A4, HIGH);
+  pinMode(A3, OUTPUT); // PIR Ground
+  digitalWrite(A3, LOW);
+  Bridge.begin();
+  Console.begin();
+  motorStatus = off;
+  motorLastStop = (motorDelayOn - 2000);
+  sensors.begin();
+  nextLogTime += 15000; // initial logtime
+  jumpPir = false;
+
+  twilcd.begin(16, 2);
+  twilcd.home();
+  twilcd.setBacklight(HIGH);
+  twilcd.setCursor ( 0, 0 );
+  twilcd.print("Thingspeak.com");
+  twilcd.setCursor ( 0, 1 );
+  twilcd.print("/Plugins/11756");
+  delay (5000);
+  for (int positionCounter = 0; positionCounter < 16; positionCounter++) {
+    // scroll one position left:
+    twilcd.scrollDisplayLeft();
+    // wait a bit:
+    delay(250);
+    
+  }
+  twilcd.clear();
+  twilcd.setCursor ( 0, 0 );
+  twilcd.print("Please wait");
+  twilcd.setCursor ( 0, 1 );
+  twilcd.print("Starting Network");
+  twilcd.setCursor ( 12, 0 );
+  twilcd.print(".");
+  delay (1000);
+  twilcd.setCursor ( 13, 0 );
+  twilcd.print(".");
+  delay (1000);
+  twilcd.setCursor ( 14, 0 );
+  twilcd.print(".");
+  delay (1000);
+  twilcd.setCursor ( 15, 0 );
+  twilcd.print(".");
+  delay (2000);
+  twilcd.clear();
+  twilcd.home();
+  
+ HttpClient client;
+  client.get("http://thingspeak.com");
+    int c = client.read();
+    if (c >= 60){
+    twilcd.setCursor ( 0, 0 );
+    twilcd.print("connection"); 
+    twilcd.setCursor ( 0, 1 );
+    twilcd.print("Successful");
+    delay(5000);
+    twilcd.clear();
+    twilcd.setCursor ( 0, 0 );
+    twilcd.print("Running Sensor");
+    twilcd.setCursor ( 0, 1 );
+    twilcd.print("Check");
+    }else{
+    twilcd.setCursor ( 0, 0 );
+    twilcd.print("connection");
+    twilcd.setCursor ( 0, 1 );
+    twilcd.print("Failed");
+   delay(5000);
+    twilcd.clear();
+    twilcd.setCursor ( 0, 0 );
+    twilcd.print("ThingSpeak Will");
+    twilcd.setCursor ( 0, 1 );
+    twilcd.print("Not Be Updated!");
+    delay(5000);
+    twilcd.clear();
+    twilcd.setCursor ( 0, 0 );
+    twilcd.print("Running Sensor");
+    twilcd.setCursor ( 0, 1 );
+    twilcd.print("Check");
+    
+    }
+ 
+
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////
+  for (int i = 0; i < 100; i++) {
+    analogRead(sensorPin);  // Read the analogue voltage 50 times
+    delay(20);
+  }
+  //analogWrite(motorPin, 255);
+  twilcd.setCursor ( 5, 1 );
+    twilcd.print(".");
+  delay (4000);
+  analogWrite(motorPin, 0);
+  twilcd.setCursor ( 6, 1 );
+    twilcd.print(".");
+  delay (4000);
+  digitalWrite(fanPin, HIGH);
+  twilcd.setCursor ( 7, 1 );
+    twilcd.print(".");
+  delay (4000);
+  twilcd.setCursor ( 8, 1 );
+    twilcd.print(".");
+  delay (4000);
+  twilcd.setCursor ( 9, 1 );
+    twilcd.print(".");
+  delay (4000);
+  digitalWrite(fanPin, LOW);
+  twilcd.setCursor ( 10, 1 );
+    twilcd.print(".");
+  delay(2000);
+  twilcd.setCursor ( 11, 1 );
+    twilcd.print(".");
+    delay(1000);
+    twilcd.setCursor ( 12, 1 );
+    twilcd.print(".");
+    delay(1000);
+    twilcd.setCursor ( 13, 1 );
+    twilcd.print(".");
+    delay(1000);
+  twilcd.clear();
+  twilcd.setBacklight(HIGH);
+  isLcdLightOn = true;
+  lcdLightOn_StartMillis = millis(); // Lcd Light Timer
+  currentLcdLightOnTime = 0;
+  
+  twilcd.setCursor ( 0, 0 );
+  twilcd.print("00.00");
+  twilcd.print("\"");
+  
+  twilcd.setCursor ( 10, 0 );
+  twilcd.print("00.00");
+  twilcd.print((char)223); 
+  
+}
+
+void loop() {
+  
+  if(isLcdLightOn){
+    currentLcdLightOnTime = millis() - lcdLightOn_StartMillis;
+    if(currentLcdLightOnTime > LCD_LIGHT_ON_TIME){
+      isLcdLightOn = false;
+      twilcd.setBacklight(LOW); //Light off
+      
+    }
+    
+  }
+  
+
+String dataString;
+ dataString += getTimeStamp();
+  twilcd.setCursor ( 0, 1 );
+  twilcd.print(dataString);
+  
+if (jumpPir == true){
+    goto BAILOUT;
+}else{
+  int reading = digitalRead(pirPin);
+  if (reading == HIGH) {
+    twilcd.setBacklight(HIGH);
+    isLcdLightOn = true;
+    lcdLightOn_StartMillis = millis(); // Lcd Light Timer
+    currentLcdLightOnTime = 0;
+  }
+
+  if (nextLogTime <= millis()) {
+    temp_f = currentTemp();
+    nextLogTime += 15000;
+  }
+
+  if (temp_f >= 95.00) {
+    digitalWrite(fanPin, HIGH);
+  }
+  if (temp_f <= 85.00) {
+    digitalWrite(fanPin, LOW);
+  }
+}
+BAILOUT:
+
+if ((motorStatus == off && (millis() - motorLastStop) > motorDelayOn) && isLcdLightOn == false){
+  //if (motorStatus == off && (millis() - motorLastStop) > motorDelayOn) {
+   // for (int i = 0; i < 30; i++) {
+      //pir();
+      //if (pir() == true) {
+        //i = 0;
+        //return;
+      //}
+    //}
+    jumpPir = true;
+    motorStatus = on;
+    analogWrite(motorPin, 255);
+    //digitalWrite(motorPin, HIGH);
+    motorLastStart = millis();
+  }
+
+  if (motorStatus == on && (millis() - motorLastStart) > motorDelayOff) {
+    motorStatus = off;
+    analogWrite(motorPin, 0);
+    //digitalWrite(motorPin, LOW);
+    motorLastStop = millis();
+    LogStatus = yes;
+  }
+  if (LogStatus == yes && (millis() - motorLastStop) > 2000) {
+    logToSerial();
+  }
+}
+
+void logToSerial() {
+
+  for (int i = 0; i < 50; i++) {
+    sensorRead = sensorRead + analogRead(sensorPin) + sensorOffset;  // Read the analogue voltage 50 times
+    delay(20);  // Short delay to slow things down
+  }
+  sensorValue = sensorRead / 50;
+  //sensorValue = analogRead(sensorPin) + sensorOffset;  // Read sensor & adjust with offset
+
+  if (sensorValue == 0) {
+    kpa = 0;
+    voltage = 0;
+    inch = 0;
+    psi = 0;
+  } else {
+    voltage = sensorValue * (voltageMax / sensorMax);
+    kpa = ((voltage / kpaRangeTopVoltage) - 0.04) / 0.018;
+    inch = (kpa * 4.01325981) + .15;
+    inch = (kpa * 4.01325981);
+    inch = inch * 4;
+    inch = round(inch);
+    inch = inch / 4;
+    psi =  (kpa * .14503773773020923);
+
+  }
+
+  if (kpa < 0.2) {
+    kpa = 0.0;
+    voltage = 0.0;
+    inch = 0.0;
+    psi = 0.0;
+  }
+
+  sensorRead = 0;
+  LogStatus = no;
+  jumpPir = false;
+
+  sensors.requestTemperatures();
+  float water = (sensors.getTempCByIndex(0));
+  water = water * 1.8 + 32;
+  if (water < -170.00 || water > 170.00) {
+    water = (00.00);
+  }
+
+  //temp_f = currentTemp();
+  
+  
+  Console.print("sensor= ");
+  Console.println(sensorValue);
+  Console.print("kpa= ");
+  Console.println(kpa, 1);
+  Console.print("psi= ");
+  Console.println(psi, 1);
+  Console.print("inch= ");
+  Console.println(inch, 2);
+  Console.print("V= ");
+  Console.println(voltage);
+  Console.print("water temp= ");
+  Console.println(water);
+  Console.print("box temp= ");
+  Console.println(temp_f);
+  Console.print("volt rail= ");
+  Console.println(voltageMax);
+  
+  
+  
+  
+  twilcd.setCursor ( 0, 0 );
+  twilcd.print(inch, 2);
+  twilcd.print("\"");
+  twilcd.print(" ");
+  
+  twilcd.setCursor ( 10, 0 );
+  twilcd.print(water);
+  twilcd.print((char)223);
+
+  float vol[ARRAY_SIZE];
+  vol[0] = (kpa);
+  vol[1] = (psi);
+  vol[2] = (inch);
+  vol[3] = (voltage);
+  vol[4] = (water);
+  vol[5] = (temp_f);
+  postToThingSpeak("H4Y96CL66GR05AGR", vol);
+}
+
+void postToThingSpeak(String key, float value[]) {
+  digitalWrite(13, HIGH);
+  Process p;
+  String cmd = "curl --data \"key=" + key;
+  for (int i = 0; i < ARRAY_SIZE; i++) {
+    cmd = cmd + "&field" + (i + 1) + "=" + value[i];
+  }
+  cmd = cmd + "\" http://api.thingspeak.com/update";
+  p.runShellCommand(cmd);
+  Console.println(cmd);
+  p.close();
+  digitalWrite(13, LOW);
+}
+
+float currentTemp() {
+  float reading = analogRead(thermistorPin);
+  reading = 1023 / reading - 1;
+  reading = 10000 / reading;
+  float steinhart;
+  steinhart = reading / 10000;
+  steinhart = log(steinhart);
+  steinhart /= 3950;
+  steinhart += 1.0 / (25 + 273.15);
+  steinhart = 1.0 / steinhart;
+  steinhart -= 273.15;
+  float temp_c = steinhart;
+  temp_c = (temp_c * 1.8 + 30.00);
+  return (temp_c);
+}
+
+bool pir() {
+  int reading = digitalRead(pirPin);
+  if (reading == HIGH) {
+    //delay (2000);
+    return (true);
+  } else {
+    //delay(2000);
+    return (false);
+  }
+}
+
+String getTimeStamp() {
+  String result;
+  Process time;
+  time.begin("date");
+  time.addParameter("+%d/%m  %T");  
+  time.run();
+
+  while(time.available()>0) {
+    char c = time.read();
+    if(c != '\n')
+      result += c;
+  }
+
+  return result;
+}
