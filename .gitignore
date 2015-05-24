@@ -1,4 +1,3 @@
-
 // NOTES
 // 50kPa = 5.10 mH20 max water column depth (http://www.convert-measurement-units.com/conversion-calculator.php?type=pressure)
 // If max v of 4.5v = 50kPa, then sensorValue of 921 (920.7) = 50kPa
@@ -36,7 +35,7 @@ unsigned long nextLogTime;
 unsigned long motorLastStop = 0;
 unsigned long motorLastStart = 0; // what time did we turn the output on?
 const unsigned long motorDelayOff = 6000;   // Length of Run //
-const unsigned long motorDelayOn = 3567000; //1800000; // Time Between Runs //
+const unsigned long motorDelayOn = 3594000; //1800000; // Time Between Runs //
 
 int motorStatus;
 const int yes = 0;
@@ -50,13 +49,10 @@ int motorPin = 6;
 int fanPin = 5;
 int sensorPin = A0;
 int pirPin = A5;
-float inch = 0;
-float psi = 0;
-float sensorRead = 0;
 
-int sensorValue = 0, sensorMax = 1023, kpaRangeTopVoltage = 4.5;
-float voltage = 0, kpa = 0, sensorOffset = -6, voltageMax = 5.0; //4.96;
-float temp_f;
+int sensorValue = 0, sensorMax = 1023, sensorRead = 0;
+float voltage = 0, kpa = 0, sensorOffset = 1, voltageMax = 5.0, kpaRangeTopVoltage = 4.5; //(sensorOffset = -6)
+float temp_f, inch = 0, psi = 0;
 
 #define LCD_LIGHT_ON_TIME 60000 // How long (in milliseconds) should lcd light stay on?
 unsigned int currentLcdLightOnTime = 0; // For calculating the lcd light on time.
@@ -66,6 +62,7 @@ boolean jumpPir;
 
 void setup() {
   Serial.begin(9600);
+  pinMode(sensorPin, INPUT);
   pinMode(motorPin, OUTPUT);
   analogWrite(motorPin, 0);
   pinMode(fanPin, OUTPUT);
@@ -96,7 +93,7 @@ void setup() {
     twilcd.scrollDisplayLeft();
     // wait a bit:
     delay(250);
-    
+
   }
   twilcd.clear();
   twilcd.setCursor ( 0, 0 );
@@ -117,13 +114,13 @@ void setup() {
   delay (2000);
   twilcd.clear();
   twilcd.home();
-  
- HttpClient client;
+
+  HttpClient client;
   client.get("http://thingspeak.com");
-    int c = client.read();
-    if (c >= 60){
+  int c = client.read();
+  if (c >= 60) {
     twilcd.setCursor ( 0, 0 );
-    twilcd.print("connection"); 
+    twilcd.print("connection");
     twilcd.setCursor ( 0, 1 );
     twilcd.print("Successful");
     delay(5000);
@@ -132,12 +129,12 @@ void setup() {
     twilcd.print("Running Sensor");
     twilcd.setCursor ( 0, 1 );
     twilcd.print("Check");
-    }else{
+  } else {
     twilcd.setCursor ( 0, 0 );
     twilcd.print("connection");
     twilcd.setCursor ( 0, 1 );
     twilcd.print("Failed");
-   delay(5000);
+    delay(5000);
     twilcd.clear();
     twilcd.setCursor ( 0, 0 );
     twilcd.print("ThingSpeak Will");
@@ -149,125 +146,113 @@ void setup() {
     twilcd.print("Running Sensor");
     twilcd.setCursor ( 0, 1 );
     twilcd.print("Check");
-    
-    }
- 
-
+  }
   /////////////////////////////////////////////////////////////////////////////////////////////////////////
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < 50; i++) {
     analogRead(sensorPin);  // Read the analogue voltage 50 times
     delay(20);
   }
-  //analogWrite(motorPin, 255);
   twilcd.setCursor ( 5, 1 );
-    twilcd.print(".");
+  twilcd.print(".");
+  digitalWrite(motorPin, HIGH);
   delay (4000);
-  analogWrite(motorPin, 0);
   twilcd.setCursor ( 6, 1 );
-    twilcd.print(".");
+  digitalWrite(motorPin, LOW);
+  twilcd.print(".");
   delay (4000);
   digitalWrite(fanPin, HIGH);
   twilcd.setCursor ( 7, 1 );
-    twilcd.print(".");
+  twilcd.print(".");
   delay (4000);
   twilcd.setCursor ( 8, 1 );
-    twilcd.print(".");
+  twilcd.print(".");
   delay (4000);
   twilcd.setCursor ( 9, 1 );
-    twilcd.print(".");
+  twilcd.print(".");
   delay (4000);
   digitalWrite(fanPin, LOW);
   twilcd.setCursor ( 10, 1 );
-    twilcd.print(".");
+  twilcd.print(".");
   delay(2000);
   twilcd.setCursor ( 11, 1 );
-    twilcd.print(".");
-    delay(1000);
-    twilcd.setCursor ( 12, 1 );
-    twilcd.print(".");
-    delay(1000);
-    twilcd.setCursor ( 13, 1 );
-    twilcd.print(".");
-    delay(1000);
+  twilcd.print(".");
+  delay(1000);
+  twilcd.setCursor ( 12, 1 );
+  twilcd.print(".");
+  delay(1000);
+  twilcd.setCursor ( 13, 1 );
+  twilcd.print(".");
+  delay(1000);
   twilcd.clear();
   twilcd.setBacklight(HIGH);
   isLcdLightOn = true;
   lcdLightOn_StartMillis = millis(); // Lcd Light Timer
   currentLcdLightOnTime = 0;
-  
+
   twilcd.setCursor ( 0, 0 );
   twilcd.print("00.00");
   twilcd.print("\"");
-  
+
   twilcd.setCursor ( 10, 0 );
   twilcd.print("00.00");
-  twilcd.print((char)223); 
+  twilcd.print((char)223);
   
+  twilcd.setCursor ( 0, 1 );
+  twilcd.print("TimeStamp = NULL");
+ 
 }
 
 void loop() {
-  
-  if(isLcdLightOn){
+
+  if (isLcdLightOn) {
     currentLcdLightOnTime = millis() - lcdLightOn_StartMillis;
-    if(currentLcdLightOnTime > LCD_LIGHT_ON_TIME){
+    if (currentLcdLightOnTime > LCD_LIGHT_ON_TIME) {
       isLcdLightOn = false;
       twilcd.setBacklight(LOW); //Light off
-      
+
     }
-    
   }
-  
 
-String dataString;
- dataString += getTimeStamp();
-  twilcd.setCursor ( 0, 1 );
-  twilcd.print(dataString);
-  
-if (jumpPir == true){
+  if (jumpPir == true) {
     goto BAILOUT;
-}else{
-  int reading = digitalRead(pirPin);
-  if (reading == HIGH) {
-    twilcd.setBacklight(HIGH);
-    isLcdLightOn = true;
-    lcdLightOn_StartMillis = millis(); // Lcd Light Timer
-    currentLcdLightOnTime = 0;
-  }
+  } else {
+    int reading = digitalRead(pirPin);
+    if (reading == HIGH) {
+      twilcd.setBacklight(HIGH);
+      isLcdLightOn = true;
+      lcdLightOn_StartMillis = millis(); // Lcd Light Timer
+      currentLcdLightOnTime = 0;
+    }
 
-  if (nextLogTime <= millis()) {
-    temp_f = currentTemp();
-    nextLogTime += 15000;
-  }
+    if (nextLogTime <= millis()) {
+      temp_f = currentTemp();
+      nextLogTime += 15000;
+    }
 
-  if (temp_f >= 95.00) {
-    digitalWrite(fanPin, HIGH);
+    if (temp_f >= 95.00) {
+      digitalWrite(fanPin, HIGH);
+    }
+    if (temp_f <= 85.00) {
+      digitalWrite(fanPin, LOW);
+    }
   }
-  if (temp_f <= 85.00) {
-    digitalWrite(fanPin, LOW);
-  }
-}
 BAILOUT:
 
-if ((motorStatus == off && (millis() - motorLastStop) > motorDelayOn) && isLcdLightOn == false){
-  //if (motorStatus == off && (millis() - motorLastStop) > motorDelayOn) {
-   // for (int i = 0; i < 30; i++) {
-      //pir();
-      //if (pir() == true) {
-        //i = 0;
-        //return;
-      //}
-    //}
+  if ((motorStatus == off && (millis() - motorLastStop) > motorDelayOn) && isLcdLightOn == false) {
     jumpPir = true;
+    digitalWrite(A4, LOW);
     motorStatus = on;
-    analogWrite(motorPin, 255);
-    //digitalWrite(motorPin, HIGH);
+    //analogWrite(motorPin, 255);
+    //delay(1000);
+    //analogWrite(motorPin, 200);
+    digitalWrite(motorPin, HIGH);
     motorLastStart = millis();
   }
 
   if (motorStatus == on && (millis() - motorLastStart) > motorDelayOff) {
     motorStatus = off;
-    analogWrite(motorPin, 0);
-    //digitalWrite(motorPin, LOW);
+    //analogWrite(motorPin, 0);
+    digitalWrite(motorPin, LOW);
     motorLastStop = millis();
     LogStatus = yes;
   }
@@ -277,13 +262,18 @@ if ((motorStatus == off && (millis() - motorLastStop) > motorDelayOn) && isLcdLi
 }
 
 void logToSerial() {
-
-  for (int i = 0; i < 50; i++) {
-    sensorRead = sensorRead + analogRead(sensorPin) + sensorOffset;  // Read the analogue voltage 50 times
+  
+  //sensorValue = analogRead(sensorPin) + sensorOffset;
+ 
+ for (int i = 0; i < 50; i++) {
+   sensorRead = sensorRead + analogRead(sensorPin) + sensorOffset;  // Read the analogue voltage 50 times
     delay(20);  // Short delay to slow things down
   }
-  sensorValue = sensorRead / 50;
-  //sensorValue = analogRead(sensorPin) + sensorOffset;  // Read sensor & adjust with offset
+ sensorValue = sensorRead / 50;
+ 
+ digitalWrite(A4, HIGH);
+ jumpPir = false;
+ delay(1000);
 
   if (sensorValue == 0) {
     kpa = 0;
@@ -294,10 +284,11 @@ void logToSerial() {
     voltage = sensorValue * (voltageMax / sensorMax);
     kpa = ((voltage / kpaRangeTopVoltage) - 0.04) / 0.018;
     inch = (kpa * 4.01325981) + .15;
-    inch = (kpa * 4.01325981);
-    inch = inch * 4;
-    inch = round(inch);
-    inch = inch / 4;
+    //inch = inch * 4;
+    //inch = round(inch);
+    //inch = inch / 4;
+    int inchShort = inch;
+    inch = (inchShort + .00);
     psi =  (kpa * .14503773773020923);
 
   }
@@ -311,18 +302,20 @@ void logToSerial() {
 
   sensorRead = 0;
   LogStatus = no;
-  jumpPir = false;
-
+  
   sensors.requestTemperatures();
   float water = (sensors.getTempCByIndex(0));
   water = water * 1.8 + 32;
   if (water < -170.00 || water > 170.00) {
     water = (00.00);
   }
+  if (water > 99.99) {
+    water = (99.00);
+  }
+  if (water < 00.00) {
+    water = (00.00);
+  }
 
-  //temp_f = currentTemp();
-  
-  
   Console.print("sensor= ");
   Console.println(sensorValue);
   Console.print("kpa= ");
@@ -337,17 +330,17 @@ void logToSerial() {
   Console.println(water);
   Console.print("box temp= ");
   Console.println(temp_f);
-  Console.print("volt rail= ");
-  Console.println(voltageMax);
-  
-  
-  
-  
+
+  String dataString;
+  dataString += getTimeStamp();
+  twilcd.setCursor ( 0, 1 );
+  twilcd.print(dataString);
+
   twilcd.setCursor ( 0, 0 );
   twilcd.print(inch, 2);
   twilcd.print("\"");
-  twilcd.print(" ");
-  
+  twilcd.print("  ");
+
   twilcd.setCursor ( 10, 0 );
   twilcd.print(water);
   twilcd.print((char)223);
@@ -392,27 +385,16 @@ float currentTemp() {
   return (temp_c);
 }
 
-bool pir() {
-  int reading = digitalRead(pirPin);
-  if (reading == HIGH) {
-    //delay (2000);
-    return (true);
-  } else {
-    //delay(2000);
-    return (false);
-  }
-}
-
 String getTimeStamp() {
   String result;
   Process time;
   time.begin("date");
-  time.addParameter("+%d/%m  %T");  
+  time.addParameter("+%d/%m     %H:%M ");
   time.run();
 
-  while(time.available()>0) {
+  while (time.available() > 0) {
     char c = time.read();
-    if(c != '\n')
+    if (c != '\n')
       result += c;
   }
 
