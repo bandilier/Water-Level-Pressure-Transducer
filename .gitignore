@@ -154,6 +154,7 @@ void setup() {
   }
   twilcd.setCursor ( 5, 1 );
   twilcd.print(".");
+  delay(1000);
   digitalWrite(motorPin, HIGH);
   delay (4000);
   twilcd.setCursor ( 6, 1 );
@@ -196,10 +197,10 @@ void setup() {
   twilcd.setCursor ( 10, 0 );
   twilcd.print("00.00");
   twilcd.print((char)223);
-  
+
   twilcd.setCursor ( 0, 1 );
   twilcd.print("TimeStamp = NULL");
- 
+
 }
 
 void loop() {
@@ -262,24 +263,24 @@ BAILOUT:
 }
 
 void logToSerial() {
-  
+
   //sensorValue = analogRead(sensorPin) + sensorOffset;
- 
- for (int i = 0; i < 50; i++) {
-   sensorRead = sensorRead + analogRead(sensorPin) + sensorOffset;  // Read the analogue voltage 50 times
+
+  for (int i = 0; i < 50; i++) {
+    sensorRead = sensorRead + analogRead(sensorPin) + sensorOffset;  // Read the analogue voltage 50 times
     delay(20);  // Short delay to slow things down
   }
- sensorValue = sensorRead / 50;
- 
- digitalWrite(A4, HIGH);
- jumpPir = false;
- delay(1000);
+  sensorValue = sensorRead / 50;
+
+  digitalWrite(A4, HIGH);
+  jumpPir = false;
+  delay(1000);
 
   if (sensorValue == 0) {
-    kpa = 0;
-    voltage = 0;
-    inch = 0;
-    psi = 0;
+    kpa = 0.0;
+    voltage = 0.0;
+    inch = 0.0;
+    psi = 0.0;
   } else {
     voltage = sensorValue * (voltageMax / sensorMax);
     kpa = ((voltage / kpaRangeTopVoltage) - 0.04) / 0.018;
@@ -302,7 +303,7 @@ void logToSerial() {
 
   sensorRead = 0;
   LogStatus = no;
-  
+
   sensors.requestTemperatures();
   float water = (sensors.getTempCByIndex(0));
   water = water * 1.8 + 32;
@@ -331,10 +332,18 @@ void logToSerial() {
   Console.print("box temp= ");
   Console.println(temp_f);
 
+  HttpClient client;
   String dataString;
   dataString += getTimeStamp();
   twilcd.setCursor ( 0, 1 );
-  twilcd.print(dataString);
+  client.get("http://thingspeak.com");
+  int c = client.read();
+  if (c >= 60) {
+    twilcd.print(dataString);
+  } else {
+    twilcd.print("No Internet Conn");
+  }
+
 
   twilcd.setCursor ( 0, 0 );
   twilcd.print(inch, 2);
@@ -342,8 +351,14 @@ void logToSerial() {
   twilcd.print("  ");
 
   twilcd.setCursor ( 10, 0 );
-  twilcd.print(water);
-  twilcd.print((char)223);
+  if (water < 10.00) {
+    twilcd.print("0");
+    twilcd.print(water);
+    twilcd.print((char)223);
+  } else {
+    twilcd.print(water);
+    twilcd.print((char)223);
+  }
 
   float vol[ARRAY_SIZE];
   vol[0] = (kpa);
@@ -400,3 +415,4 @@ String getTimeStamp() {
 
   return result;
 }
+
